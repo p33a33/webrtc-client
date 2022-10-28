@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+import { TURN_SERVER, TURN_SERVER_PASSWORD, TURN_SERVER_USER_NAME } from "../constants";
 import { socket } from "../index";
 import { DataChannelMessage } from "../types";
 
@@ -29,9 +30,9 @@ const useWebRTC = ({
     const connection = new RTCPeerConnection({
       iceServers: [
         {
-          urls: "turn:192.168.0.17",
-          username: "david",
-          credential: "david",
+          urls: TURN_SERVER,
+          username: TURN_SERVER_USER_NAME,
+          credential: TURN_SERVER_PASSWORD,
         },
       ],
       iceTransportPolicy: "all",

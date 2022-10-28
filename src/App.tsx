@@ -1,5 +1,5 @@
+import clsx from "clsx";
 import { useCallback, useEffect, useRef, useState } from "react";
-import "./App.css";
 import { socket } from ".";
 import useWebRTC from "./hooks/useWebRTC";
 import { CallStateEnum, DataChannelMessage, ShareOptionEnum } from "./types";
@@ -12,7 +12,6 @@ import {
   rejectIncommingCall,
   switchScreenShareTrack,
 } from "./utils";
-import { send } from "process";
 
 const uri = window.location.href;
 
@@ -20,7 +19,11 @@ function App() {
   const [userName, setUserName] = useState<string>("");
   const [availableUsers, setAvailableUsers] = useState<
     { name: string; state: "AVAILABLE" | "UNAVAILABLE"; id: string }[]
-  >([]);
+    >([{
+      name: 'dummy',
+      state: 'AVAILABLE',
+      id : 'dummmmy'
+  }]);
   const [selectedUser, setSelectedUser] = useState<string>("");
   const [callState, setCallState] = useState<CallStateEnum>(
     CallStateEnum.WAITING
@@ -204,51 +207,23 @@ function App() {
   }, [userName, createPeerConnection]);
 
   return (
-    <div
-      style={{
-        width: "100vw",
-        height: "100vh",
-        display: "flex",
-        alignItems: "center",
-        flexDirection: "row",
-      }}
-    >
-      <aside
-        style={{
-          display: "flex",
-          height: "100%",
-          flexDirection: "column",
-          alignItems: "center",
-          borderRight: `1px solid black`,
-          padding: "16px",
-          width: "150px",
-        }}
-      >
-        <p style={{ fontSize: 14, marginBottom: 8 }}>{uri}</p>
+    <div className="flex w-screen h-screen align-center flex-row">
+      <aside className="flex h-100 flex-col align-center  border-solid border-black border-1 p-4 w-1/2 gap-8 border-r">
+        <p className="text-base mb-2 font-semibold">{uri}</p>
         {userName && (
-          <p style={{ fontSize: 14, marginBottom: 8 }}> 내 이름 : {userName}</p>
+          <p className="text-base mb-2 font-medium"> 내 이름 : {userName}</p>
         )}
 
         {!userName && (
-          <div
-            style={{
-              fontSize: 14,
-              display: "flex",
-              gap: 4,
-              flexDirection: "column",
-            }}
-          >
+          <div className="flex text-base gap-4 flex-col font-medium">
             내 사용자이름 입력
-            <div style={{ display: "flex", gap: 4 }}>
-              <input ref={userNameInput} style={{ width: "100%" }} />
+            <div className="flex gap-2 justify-between items-center">
+              <input
+                ref={userNameInput}
+                className="w-full border-solid border border-black rounded-lg text-lg p-1"
+              />
               <button
-                style={{
-                  alignSelf: "flex-end",
-                  margin: 0,
-                  fontSize: 12,
-                  minWidth: 50,
-                  height: "100%",
-                }}
+                className="flex m-0 text-sx p-2 w-1/4 justify-center border-lg border-solid border-indigo-500 rounded-lg bg-sky-500 text-white"
                 onClick={() => {
                   if (!userNameInput.current) return;
                   const { value } = userNameInput.current;
@@ -267,16 +242,23 @@ function App() {
             </div>
           </div>
         )}
-        <div>
+        <div className="flex flex-col gap-4 text-base font-medium">
           공유방법 선택
-          <div style={{ display: "flex" }}>
-            <button onClick={() => setShareOption(ShareOptionEnum.AUDIO_ONLY)}>
+          <div className="flex self-center gap-2 text-sm font-medium w-full h-14">
+            <button
+              className="basis-full border border-sky-500 p-1 rounded-lg bg-sky-500 text-white"
+              onClick={() => setShareOption(ShareOptionEnum.AUDIO_ONLY)}
+            >
               마이크
             </button>
-            <button onClick={() => setShareOption(ShareOptionEnum.WITH_CAMERA)}>
+            <button
+              className="basis-full border border-sky-500 p-1 rounded-lg bg-sky-500 text-white"
+              onClick={() => setShareOption(ShareOptionEnum.WITH_CAMERA)}
+            >
               카메라
             </button>
             <button
+              className="basis-full border border-sky-500 p-1 rounded-lg bg-sky-500 text-white"
               onClick={() => setShareOption(ShareOptionEnum.WITH_DISPLAY)}
             >
               화면공유
@@ -284,54 +266,37 @@ function App() {
           </div>
         </div>
 
-        <p>온라인 유저 목록</p>
+        <p className="text-base font-medium">온라인 유저 목록</p>
         <div
-          style={{
-            display: "flex",
-            gap: 4,
-            flexDirection: "column",
-            width: "100%",
-          }}
+          className="flex gap-1 flex-col w-full"
         >
           {availableUsers.map((user) => (
             <div
+              className={clsx(["transition-all","group","w-full", "border-sky-500", "border-solid", "border-2", "p-2", "flex", "justify-between", "items-center", "hover:cursor-pointer", "hover:bg-sky-500", "hover:border-sky-500", "rounded-xl", "text-sky-600"], {
+                'bg-sky-700': selectedUser === user.id,
+                'border-sky-700': selectedUser === user.id,
+              })}
               key={user.id}
-              style={{
-                width: "100%",
-                border: `1px solid skyblue`,
-                borderRadius: "4px",
-                padding: 4,
-                backgroundColor: selectedUser === user.id ? "skyblue" : "unset",
-                borderColor: selectedUser === user.id ? "black" : "skyblue",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.cursor = "pointer";
-                e.currentTarget.style.background = "skyblue";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.cursor = "default";
-                if (selectedUser === user.id) return;
-                e.currentTarget.style.background = "unset";
-              }}
             >
               <p
+                className={clsx(["transition-all", "text-base", "m-0", "font-semibold", "group-hover:text-white"], {
+                  'text-gray-700': user.state !== 'AVAILABLE',
+                })}
                 key={user.id}
-                style={{
-                  color: user.state === "AVAILABLE" ? "black" : "gray",
-                  fontSize: 12,
-                  margin: 0,
-                }}
               >
                 {user.name}
               </p>
               {user.state === "AVAILABLE" && (
-                <button onClick={() => makeACall(user.id)}>연결</button>
+                <button
+                  className="border border-sky-500 p-1 px-2 rounded-lg bg-sky-500 text-white group-hover:bg-white group-hover:text-sky-500 group-hover:font-semibold"
+                  onClick={() => makeACall(user.id)}
+                >
+                  연결가능
+                </button>
               )}
               {user.state === "UNAVAILABLE" && user.id === selectedUser && (
                 <button
+                  className="basis-full border border-sky-500 p-1 rounded-lg bg-sky-500 text-white"
                   onClick={() => {
                     closeConnection();
                     socket.emit("user:available", userName);
@@ -371,6 +336,7 @@ function App() {
             >
               연결 요청 수신중
               <button
+                className="basis-full border border-sky-500 p-1 rounded-lg bg-sky-500 text-white"
                 disabled={!isIncomingCall}
                 onClick={async () => {
                   if (!incomingOffer.current?.callerId) return;
@@ -385,6 +351,7 @@ function App() {
                 연결하기
               </button>
               <button
+                className="basis-full border border-sky-500 p-1 rounded-lg bg-sky-500 text-white"
                 disabled={!isIncomingCall}
                 onClick={async () => {
                   if (!incomingOffer.current?.callerId) return;
@@ -397,16 +364,8 @@ function App() {
               </button>
             </div>
             <div
+              className="absolute inset-0 overflow-hidden flex justify-cetner items-center"
               style={{
-                position: "absolute",
-                top: 0,
-                bottom: 0,
-                left: 0,
-                right: 0,
-                overflow: "hidden",
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
                 backgroundColor: `rgba(0, 0, 0, 0.5)`,
               }}
             />
@@ -418,19 +377,32 @@ function App() {
               shareOption === ShareOptionEnum.WITH_DISPLAY ? "flex" : "none",
           }}
         >
-          <div
-            style={{
-              position: "fixed",
-              bottom: 30,
-              right: 30,
-              width: "300px",
-              height: "fit-content",
-              zIndex: 2,
-            }}
-          >
-            <video ref={localPlayer} width={300} height={"auto"} />
+          <div className="group fixed bottom-7 right-7 w-75 z-2 h-fit">
+            <video
+              className="rounded-lg"
+              ref={localPlayer}
+              width={300}
+              height={"auto"}
+            />
+            <div className="absolute bg-black inset-0 opacity-0 rounded-lg group-hover:opacity-30 transition-all text-white font-lg p-4 hover:cursor-pointer"
+            onClick={() => {
+              const thisStream = localPlayer.current?.srcObject;
+              const bigStream = remotePlayer.current?.srcObject;
+
+              if (thisStream && remotePlayer.current) {
+                remotePlayer.current.autoplay = true;
+                remotePlayer.current.srcObject = thisStream
+              }
+
+              if (bigStream && localPlayer.current) {
+                localPlayer.current.autoplay = true
+                localPlayer.current.srcObject = bigStream
+              }
+            }}>
+              크게보기
+            </div>
             <button
-              style={{ position: "absolute", bottom: 0, right: 0 }}
+              className="transition-all opacity-0 absolute bottom-1 right-1 basis-full border border-sky-500 p-2 rounded-lg bg-sky-500 text-white hover:bg-sky-700 hover:border-sky-700 hover:font-medium text-sm group-hover:flex hover:group-hover:opacity-100 group-hover:opacity-40"
               onClick={async () => {
                 const peerConnection = connection.current;
                 if (!peerConnection || !localPlayer.current) return;
@@ -440,7 +412,7 @@ function App() {
                 );
               }}
             >
-              change view
+              CHANGE VIEW
             </button>
           </div>
           <video ref={remotePlayer} width={"auto"} height={"auto"} />

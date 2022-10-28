@@ -4,8 +4,9 @@ import "./index.css";
 import App from "./App";
 import reportWebVitals from "./reportWebVitals";
 import { io } from "socket.io-client";
+import { SIGNAL_SERVER_URL } from "./constants";
 
-export const socket = io("http://192.168.0.17:9001");
+export const socket = io(SIGNAL_SERVER_URL);
 
 const root = ReactDOM.createRoot(
   document.getElementById("root") as HTMLElement
