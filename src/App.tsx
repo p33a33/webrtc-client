@@ -1,32 +1,20 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
 import { socket } from ".";
+import useWebRTC from "./hooks/useWebRTC";
+import { CallStateEnum, DataChannelMessage, ShareOptionEnum } from "./types";
+import {
+  acceptIncommingCall,
+  addTrackToConnection,
+  call,
+  getLocalStream,
+  playLocalStreamOnPlayer,
+  rejectIncommingCall,
+  switchScreenShareTrack,
+} from "./utils";
+import { send } from "process";
 
 const uri = window.location.href;
-
-const connection = new RTCPeerConnection({
-  iceServers: [
-    {
-      urls: "turn:192.168.0.17",
-      username: "david",
-      credential: "david",
-    },
-  ],
-  iceTransportPolicy: "all",
-});
-
-enum CallStateEnum {
-  "WAITING" = "WAITING",
-  "MAKE CALL" = "MAKE CALL",
-  "INCOMING CALL" = "INCOMING CALL",
-  "ON THE PHONE" = "ON THE PHONE",
-}
-
-interface ChatMessage {
-  userName: string;
-  message: string;
-  createdAt: string;
-}
 
 function App() {
   const [userName, setUserName] = useState<string>("");
@@ -37,6 +25,7 @@ function App() {
   const [callState, setCallState] = useState<CallStateEnum>(
     CallStateEnum.WAITING
   );
+  const [shareOption, setShareOption] = useState<ShareOptionEnum | null>(null);
   const userNameInput = useRef<HTMLInputElement>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const incomingOffer = useRef<{
@@ -44,183 +33,86 @@ function App() {
     callerId: string;
   } | null>(null);
   const chatMessageInputRef = useRef<HTMLInputElement>(null);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const localStream = useRef<MediaStream | null>(null);
-  const localAudioRef = useRef<HTMLAudioElement>(null);
-  const remoteAudioRef = useRef<HTMLAudioElement>(null);
+  const [chatMessages, setChatMessages] = useState<DataChannelMessage[]>([]);
+  const localPlayer = useRef<HTMLVideoElement>(null);
+  const remotePlayer = useRef<HTMLVideoElement>(null);
+  const {
+    connection,
+    closeConnection,
+    createPeerConnection,
+    onCreateDataChannel,
+  } = useWebRTC({
+    localPlayer,
+    remotePlayer,
+    userName,
+    onReceiveChatMessage: (message: DataChannelMessage) => {
+      setChatMessages((prev) => [...prev, message]);
+    },
+  });
   const chatViewRef = useRef<HTMLDivElement>(null);
 
   const isIncomingCall = callState === CallStateEnum["INCOMING CALL"];
 
-  const onDataChannelOpen = (e: Event) => {
-    if (!dataChannelRef.current) return;
-    console.log("data channel opened", e);
-  };
+  const addLocalTrack = useCallback(async () => {
+    if (!shareOption || !connection.current || !localPlayer.current) return;
+    const stream = await getLocalStream(shareOption);
+    if (!stream) return;
+    playLocalStreamOnPlayer(stream, localPlayer.current);
+    await addTrackToConnection(stream, connection.current);
+  }, [connection, shareOption]);
 
-  const onDataChannelClose = (e: Event) => {
-    console.log("data channel closed", e);
-  };
-
-  const onDataChannelMessage = (e: MessageEvent) => {
-    const messageData = JSON.parse(e.data) as ChatMessage;
-    setChatMessages((prev) => [...prev, messageData]);
-  };
-
-  const onPeerConnectionFoundICECandidate = (e: RTCPeerConnectionIceEvent) => {
-    if (!e.candidate) return;
-    console.log("find new candidate", e);
-    socket.emit("new-ice-candidate", e.candidate);
-  };
-
-  const onPeerConnectionFoundICECandidateError = (e: Event) => {
-    console.log("iceCandidate Error : ", e);
-  };
-
-  const onPeerConnectionStateChanged = async (e: Event) => {
-    if (!connection) return;
-
-    switch (connection.connectionState) {
-      case "connected": {
-        console.log("connected");
-        setCallState(CallStateEnum["ON THE PHONE"]);
-        break;
-      }
-      case "closed":
-      case "failed":
-      case "disconnected": {
-        console.log("disconnected");
-        setCallState(CallStateEnum["WAITING"]);
-        socket.emit("user:available", userName);
-        break;
-      }
-    }
-  };
-
-  const onPeerConnectionDataChannelOpend = (e: RTCDataChannelEvent) => {
-    const dataChannel = (dataChannelRef.current = e.channel);
-    dataChannel.addEventListener("open", onDataChannelOpen);
-    dataChannel.addEventListener("close", onDataChannelClose);
-    dataChannel.addEventListener("message", onDataChannelMessage);
-  };
-
-  const onPeerConnectionTrackAdded = (e: RTCTrackEvent) => {
-    if (!remoteAudioRef.current) return;
-    console.log("track added");
-    remoteAudioRef.current.autoplay = true;
-    remoteAudioRef.current.srcObject = e.streams[0];
-  };
-
-  const getLocalAudioStream = async () => {
-    if (!navigator.mediaDevices) return;
-
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: false,
-      audio: true,
-    });
-
-    if (!localAudioRef.current) return;
-    localStream.current = stream;
-    localAudioRef.current.srcObject = stream;
-    localAudioRef.current.autoplay = true;
-  };
-
-  useEffect(() => {
-    getLocalAudioStream().then(() => {
-      if (!localStream.current) return;
-      localStream.current.getTracks().forEach((track) => {
-        if (!localStream.current) return;
-        connection.addTrack(track, localStream.current);
-      });
-    });
-  }, []);
-
-  const sendChatMessage = () => {
+  const sendChatMessage = async () => {
     if (!dataChannelRef.current || !chatMessageInputRef.current) return;
     if (!chatMessageInputRef.current.value) return;
-
     const message = chatMessageInputRef.current.value;
-    chatMessageInputRef.current.value = "";
     const createdAt = new Date().toISOString();
-
     const chatMessage = { userName, message, createdAt };
 
     setChatMessages((prev) => [...prev, chatMessage]);
-
+    chatMessageInputRef.current.value = "";
     dataChannelRef.current.send(JSON.stringify(chatMessage));
   };
 
+  const makeACall = useCallback(
+    async (calleeId: string) => {
+      if (!connection.current) return;
+      const { current: peer } = connection;
+      dataChannelRef.current = onCreateDataChannel(peer);
+      call(peer, calleeId, shareOption);
+      setSelectedUser(calleeId);
+      setCallState(CallStateEnum["MAKE CALL"]);
+    },
+    [shareOption, onCreateDataChannel, connection]
+  );
+
   useEffect(() => {
-    if (connection.currentRemoteDescription) {
-      console.log("이미 커넥션이 생성되어있음");
-      return;
+    if (shareOption) {
+      addLocalTrack();
     }
+  }, [shareOption, addLocalTrack]);
 
-    connection.addEventListener(
-      "icecandidate",
-      onPeerConnectionFoundICECandidate
-    );
-    connection.addEventListener(
-      "icecandidateerror",
-      onPeerConnectionFoundICECandidateError
-    );
-    connection.addEventListener(
-      "connectionstatechange",
-      onPeerConnectionStateChanged
-    );
-    connection.addEventListener(
-      "datachannel",
-      onPeerConnectionDataChannelOpend
-    );
-    connection.addEventListener("track", onPeerConnectionTrackAdded);
-
-    return () => {
-      if (dataChannelRef.current) {
-        dataChannelRef.current.removeEventListener("open", onDataChannelOpen);
-        dataChannelRef.current.removeEventListener("close", onDataChannelClose);
-        dataChannelRef.current.removeEventListener(
-          "message",
-          onDataChannelMessage
-        );
-      }
-      connection.removeEventListener(
-        "icecandidate",
-        onPeerConnectionFoundICECandidate
-      );
-      connection.removeEventListener(
-        "icecandidateerror",
-        onPeerConnectionFoundICECandidateError
-      );
-      connection.removeEventListener(
-        "connectionstatechange",
-        onPeerConnectionStateChanged
-      );
-      connection.removeEventListener(
-        "datachannel",
-        onPeerConnectionDataChannelOpend
-      );
-      connection.removeEventListener("track", onPeerConnectionTrackAdded);
-    };
-  }, []);
-
+  // Socket Listener
   useEffect(() => {
-    socket.on("offer", async ({ offer, callerId }) => {
-      console.log("got offer");
-      connection.setRemoteDescription(offer);
+    socket.on("offer", async ({ offer, callerId, shareOption }) => {
+      if (!connection.current) return;
+      console.log("got offer", offer);
+      connection.current.setRemoteDescription(offer);
       incomingOffer.current = { offer, callerId };
-
+      setShareOption(shareOption);
       setCallState(CallStateEnum["INCOMING CALL"]);
     });
 
     socket.on("answer", async (answer: RTCSessionDescriptionInit) => {
       console.log("got answer", answer);
+      if (!connection.current) return;
       const remoteDesc = new RTCSessionDescription(answer);
-      await connection.setRemoteDescription(remoteDesc);
+      await connection.current.setRemoteDescription(remoteDesc);
     });
 
     socket.on("new-candidate", async (candidate: RTCIceCandidate) => {
-      if (!connection.remoteDescription) return;
-      console.log("got new candidate", candidate);
-      await connection.addIceCandidate(candidate);
+      if (!connection.current) return;
+      if (!connection.current.remoteDescription) return;
+      await connection.current.addIceCandidate(candidate);
     });
 
     socket.on("user:new", ({ name, id }) => {
@@ -235,7 +127,6 @@ function App() {
     });
 
     socket.on("user:available", ({ name, id }) => {
-      console.log(name, id);
       setAvailableUsers((prev) =>
         prev.map((user) => {
           if (user.name === name) {
@@ -279,8 +170,9 @@ function App() {
     return () => {
       socket.removeAllListeners();
     };
-  }, []);
+  }, [connection]);
 
+  // Call State
   useEffect(() => {
     switch (callState) {
       case CallStateEnum.WAITING: {
@@ -296,6 +188,7 @@ function App() {
     }
   }, [callState, userName]);
 
+  // Keep Chat View displays LastMessage
   useEffect(() => {
     if (!chatViewRef.current) return;
 
@@ -303,6 +196,12 @@ function App() {
       top: chatViewRef.current.scrollHeight,
     });
   }, [chatMessages.length]);
+
+  useEffect(() => {
+    if (userName) {
+      createPeerConnection();
+    }
+  }, [userName, createPeerConnection]);
 
   return (
     <div
@@ -354,13 +253,13 @@ function App() {
                   if (!userNameInput.current) return;
                   const { value } = userNameInput.current;
                   if (!value) return window.alert("유저이름을 입력해주세요");
-                  if (userName === value) return;
-                  if (userName) {
-                    socket.emit("user:deleted", userName);
+                  if (userName !== value) {
+                    if (userName) {
+                      socket.emit("user:deleted", userName);
+                    }
+                    socket.emit("user:new", value);
+                    setUserName(value);
                   }
-                  socket.emit("user:new", value);
-
-                  setUserName(value);
                 }}
               >
                 사용
@@ -368,6 +267,23 @@ function App() {
             </div>
           </div>
         )}
+        <div>
+          공유방법 선택
+          <div style={{ display: "flex" }}>
+            <button onClick={() => setShareOption(ShareOptionEnum.AUDIO_ONLY)}>
+              마이크
+            </button>
+            <button onClick={() => setShareOption(ShareOptionEnum.WITH_CAMERA)}>
+              카메라
+            </button>
+            <button
+              onClick={() => setShareOption(ShareOptionEnum.WITH_DISPLAY)}
+            >
+              화면공유
+            </button>
+          </div>
+        </div>
+
         <p>온라인 유저 목록</p>
         <div
           style={{
@@ -412,48 +328,13 @@ function App() {
                 {user.name}
               </p>
               {user.state === "AVAILABLE" && (
-                <button
-                  onClick={async () => {
-                    setSelectedUser(user.id);
-                    socket.emit("user:join", user.id);
-                    if (!dataChannelRef.current) {
-                      const newDataChannel =
-                        connection.createDataChannel("messages");
-                      newDataChannel.addEventListener(
-                        "open",
-                        onDataChannelOpen
-                      );
-                      newDataChannel.addEventListener(
-                        "close",
-                        onDataChannelClose
-                      );
-                      newDataChannel.addEventListener(
-                        "message",
-                        onDataChannelMessage
-                      );
-                      dataChannelRef.current = newDataChannel;
-                    }
-
-                    await getLocalAudioStream();
-
-                    const offer = await connection.createOffer({
-                      offerToReceiveAudio: true,
-                      offerToReceiveVideo: false,
-                    });
-                    await connection.setLocalDescription(offer);
-
-                    console.log("send offer", offer);
-                    socket.emit("offer", offer, user.id);
-                    setCallState(CallStateEnum["MAKE CALL"]);
-                  }}
-                >
-                  연결
-                </button>
+                <button onClick={() => makeACall(user.id)}>연결</button>
               )}
               {user.state === "UNAVAILABLE" && user.id === selectedUser && (
                 <button
                   onClick={() => {
-                    connection.close();
+                    closeConnection();
+                    socket.emit("user:available", userName);
                   }}
                 >
                   통화종료
@@ -493,20 +374,12 @@ function App() {
                 disabled={!isIncomingCall}
                 onClick={async () => {
                   if (!incomingOffer.current?.callerId) return;
-                  const answer = await connection.createAnswer();
-                  await connection.setLocalDescription(answer);
-                  await getLocalAudioStream();
-
-                  if (!localStream.current) return;
-
-                  localStream.current.getTracks().forEach((track) => {
-                    if (!localStream.current) return;
-                    connection.addTrack(track, localStream.current);
-                  });
-
-                  console.log("send answer");
-                  socket.emit("answer", answer, incomingOffer.current.callerId);
-                  console.log(connection);
+                  if (!connection.current) return;
+                  await acceptIncommingCall(
+                    connection.current,
+                    incomingOffer.current?.callerId
+                  );
+                  setCallState(CallStateEnum["ON THE PHONE"]);
                 }}
               >
                 연결하기
@@ -514,10 +387,8 @@ function App() {
               <button
                 disabled={!isIncomingCall}
                 onClick={async () => {
-                  socket.emit(
-                    "connect:reject",
-                    incomingOffer.current?.callerId
-                  );
+                  if (!incomingOffer.current?.callerId) return;
+                  rejectIncommingCall(incomingOffer.current.callerId);
                   incomingOffer.current = null;
                   setCallState(CallStateEnum.WAITING);
                 }}
@@ -541,8 +412,39 @@ function App() {
             />
           </div>
         )}
-        <audio ref={localAudioRef} muted />
-        <audio ref={remoteAudioRef} />
+        <div
+          style={{
+            display:
+              shareOption === ShareOptionEnum.WITH_DISPLAY ? "flex" : "none",
+          }}
+        >
+          <div
+            style={{
+              position: "fixed",
+              bottom: 30,
+              right: 30,
+              width: "300px",
+              height: "fit-content",
+              zIndex: 2,
+            }}
+          >
+            <video ref={localPlayer} width={300} height={"auto"} />
+            <button
+              style={{ position: "absolute", bottom: 0, right: 0 }}
+              onClick={async () => {
+                const peerConnection = connection.current;
+                if (!peerConnection || !localPlayer.current) return;
+                await switchScreenShareTrack(
+                  peerConnection,
+                  localPlayer.current
+                );
+              }}
+            >
+              change view
+            </button>
+          </div>
+          <video ref={remotePlayer} width={"auto"} height={"auto"} />
+        </div>
         <div style={{ height: "100%" }}>
           <div
             ref={chatViewRef}
